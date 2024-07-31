@@ -1,0 +1,225 @@
+<html><head><base href="https://websim.example.com/tug-of-war-timer/">
+<title>Tug of War Timer</title>
+<style>
+    body {
+        font-family: Arial, sans-serif;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 100vh;
+        margin: 0;
+        background-color: #f0f0f0;
+    }
+    .container {
+        text-align: center;
+        background-color: white;
+        padding: 2rem;
+        border-radius: 10px;
+        box-shadow: 0 0 10px rgba(0,0,0,0.1);
+    }
+    #timer {
+        font-size: 3rem;
+        margin: 1rem 0;
+    }
+    .buttons {
+        display: flex;
+        justify-content: center;
+        gap: 1rem;
+    }
+    button {
+        font-size: 1rem;
+        padding: 0.5rem 1rem;
+        cursor: pointer;
+        background-color: #4CAF50;
+        color: white;
+        border: none;
+        border-radius: 5px;
+        transition: background-color 0.3s;
+    }
+    button:hover {
+        background-color: #45a049;
+    }
+    #player-turn {
+        font-size: 1.5rem;
+        margin-bottom: 1rem;
+    }
+    .timer-bar {
+        width: 300px;
+        height: 20px;
+        background-color: #ddd;
+        margin: 1rem auto;
+        position: relative;
+        overflow: hidden;
+    }
+    .timer-progress {
+        height: 100%;
+        width: 50%;
+        background-color: #4CAF50;
+        transition: width 0.1s linear;
+    }
+</style>
+</head>
+<body>
+<div class="container">
+    <h1>Tug of War Timer</h1>
+    <div id="player-turn">Player 1's Turn</div>
+    <div id="timer">00:00</div>
+    <div class="timer-bar">
+        <div class="timer-progress"></div>
+    </div>
+    <div class="buttons">
+        <button id="end-turn">End Turn</button>
+        <button id="pause">Pause</button>
+        <button id="reset">Reset</button>
+    </div>
+</div>
+
+<script>
+function bunzer_ws({hostname='', port=8081, path="/"}={}) {
+  if(!hostname) hostname = location.hostname
+
+  const httpssecure = location.protocol === 'https:'
+  const ws = new WebSocket(`${httpssecure ? 'wss' : 'ws'}://${hostname}:${port}${path}`)
+
+  const waiting_to_send_q = [] // for Qing up messages we tried to send before the websocket was actually open and ready
+  const reconnect_q       = [] // resent everytime we reconnect the websocket
+  ws.onopen = () => {
+    for(const msg of reconnect_q) ws.send(msg)                   // send/resend the reconnect_q
+    let msg; while(msg = waiting_to_send_q.shift()) ws.send(msg) // drain the waiting_to_send_q
+  }
+
+  const websocket_routes = new Map()
+  ws.addEventListener('message', (event) => {
+    // try {
+      const [cmd, ...args] = JSON.parse(event.data)
+      const handler = websocket_routes.get(cmd)
+      if(handler) handler(...args)
+    // } catch(e){}
+  })
+
+  function on(cmd, handler) {websocket_routes.set(cmd, handler) }
+
+  function emit(cmd, ...args) {
+    const msg = JSON.stringify([cmd, ...args])
+    if(!ws.readyState) waiting_to_send_q.push(msg); else ws.send(msg)
+  }
+  function emit_onconnect(cmd, ...args) {
+    const msg = JSON.stringify([cmd, ...args])
+    reconnect_q.push(msg)
+    if(ws.readyState) ws.send(msg)
+  }
+
+  return {on, emit, emit_onconnect, ws, close:() => ws.close()}
+}
+function newpubsub(uuid) {
+  uuid = '\x00' + uuid // prefixed incase uuid was somehow a common word like 'lobby_state' that's used for something else
+  const ws = window.ws || window.parent.ws
+  if(ws === undefined) throw new Error('window.ws must be defined to use farzhermm. ex: window.ws = bunzer_ws()')
+
+  ws.emit_onconnect('sub', uuid)
+  ws.on(uuid, handleonmsg)
+
+  function handleonmsg(...m) { server.onmsg(...m) }
+
+  const server = {
+    send(...args) { ws.emit('pub', uuid, ...args) },
+    close() { ws.emit('unsub', uuid) },
+    onmsg(...args) { throw new Error('pubsub.onmsg is undefined') }
+  }
+
+  return server
+}
+</script>
+
+<script>
+    const timer = document.getElementById('timer');
+    const playerTurn = document.getElementById('player-turn');
+    const endTurnBtn = document.getElementById('end-turn');
+    const pauseBtn = document.getElementById('pause');
+    const resetBtn = document.getElementById('reset');
+    const timerProgress = document.querySelector('.timer-progress');
+
+    let seconds = 0;
+    let isRunning = true;
+    let isPlayer1Turn = true;
+    let intervalId;
+
+    const is_https = location.protocol === 'https:'
+    const port = is_https ? 1338 : 1339
+    const ws = window.ws = bunzer_ws({hostname:'2v2.me', port, path:'/'})
+    const pubsub = newpubsub('tugofwartimer')
+    pubsub.onmsg = (info) => {
+        isRunning = info.isRunning
+        isPlayer1Turn = info.isPlayer1Turn
+        seconds = info.seconds
+    }
+
+
+    function updateTimer() {
+        const absSeconds = Math.abs(seconds);
+        const minutes = Math.floor(absSeconds / 60);
+        const remainingSeconds = absSeconds % 60;
+        timer.textContent = `${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`;
+        
+        // Update progress bar
+        const progress = (seconds + 100) / 200 * 100;
+        timerProgress.style.width = `${progress}%`;
+        timerProgress.style.backgroundColor = isPlayer1Turn ? '#4CAF50' : '#f44336';
+    }
+
+    function startTimer() {
+        clearInterval(intervalId);
+        intervalId = setInterval(() => {
+            if (isRunning) {
+                seconds += isPlayer1Turn ? 1 : -1;
+                updateTimer();
+                checkGameOver();
+            }
+        }, 1000);
+    }
+
+    function checkGameOver() {
+        if (seconds >= 100) {
+            alert("Player 1 is out of time! Player 2 wins!");
+            resetTimer();
+        } else if (seconds <= -100) {
+            alert("Player 2 is out of time! Player 1 wins!");
+            resetTimer();
+        }
+    }
+
+    function resetTimer() {
+        clearInterval(intervalId);
+        seconds = 0;
+        isRunning = true;
+        isPlayer1Turn = true;
+        updateTimer();
+        updatePlayerTurn();
+        pauseBtn.textContent = 'Pause';
+        startTimer();
+        pubsub.send({isRunning, isPlayer1Turn, seconds})
+    }
+
+    function updatePlayerTurn() {
+        playerTurn.textContent = `Player ${isPlayer1Turn ? '1' : '2'}'s Turn`;
+    }
+
+    endTurnBtn.addEventListener('click', () => {
+        isPlayer1Turn = !isPlayer1Turn;
+        updatePlayerTurn();
+        pubsub.send({isRunning, isPlayer1Turn, seconds})
+    });
+
+    pauseBtn.addEventListener('click', () => {
+        isRunning = !isRunning;
+        pauseBtn.textContent = isRunning ? 'Pause' : 'Resume';
+        pubsub.send({isRunning, isPlayer1Turn, seconds})
+    });
+
+    resetBtn.addEventListener('click', resetTimer);
+
+    // Start the timer initially
+    startTimer();
+</script>
+</body>
+</html>
