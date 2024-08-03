@@ -1,0 +1,363 @@
+<html><head><base href="https://simulated-browser-url.com/clickgame/">
+<title>Square Clicking Game - Dark Mode Instant with Subtle Grid</title>
+<style>
+  :root {
+    --bg-color: #1a1a2e;
+    --game-bg: #16213e;
+    --square-color: #0f3460;
+    --square-hover: #1a4b8c;
+    --target-color: #e94560;
+    --text-color: #f0f0f0;
+    --miss-color: #ff2e63;
+    --slider-color: #4a4e69;
+    --grid-color: #1a1a2e;
+  }
+
+  body {
+    margin: 0;
+    padding: 0;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100vh;
+    background-color: var(--bg-color);
+    color: var(--text-color);
+    user-select: none;
+  }
+
+  body.game-active {
+    background-color: #252550;
+  }
+
+  #game-container {
+    position: relative;
+    width: 95vw;
+    height: 85vh;
+    background-color: var(--game-bg);
+    border: 2px solid var(--square-color);
+    border-radius: 10px;
+    overflow: hidden;
+    display: grid;
+  }
+
+  .square {
+    border: 1px solid var(--grid-color);
+    background-color: var(--square-color);
+    box-shadow: inset 0 0 1px var(--grid-color);
+  }
+
+  .square:hover {
+    background-color: var(--square-hover);
+  }
+
+  .target {
+    background-color: var(--target-color);
+    cursor: pointer;
+    box-shadow: 0 0 10px var(--target-color);
+  }
+
+  .target:hover {
+    background-color: var(--target-color);
+  }
+
+  .miss {
+    background-color: var(--miss-color);
+  }
+
+  #controls {
+    margin-top: 20px;
+    display: flex;
+    gap: 20px;
+    align-items: center;
+    flex-wrap: wrap;
+    justify-content: center;
+    background-color: rgba(22, 33, 62, 0.8);
+    padding: 15px;
+    border-radius: 10px;
+  }
+
+  #score, #timer, #successful-clicks, #points-per-click {
+    font-size: 18px;
+    font-weight: bold;
+  }
+
+  #size-slider {
+    width: 150px;
+    -webkit-appearance: none;
+    background: var(--slider-color);
+    outline: none;
+    border-radius: 15px;
+    overflow: hidden;
+  }
+
+  #size-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: var(--target-color);
+    cursor: pointer;
+    border: 4px solid var(--slider-color);
+    box-shadow: -407px 0 0 400px var(--target-color);
+  }
+
+  #game-over {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background-color: rgba(22, 33, 62, 0.9);
+    color: var(--text-color);
+    padding: 30px;
+    border-radius: 15px;
+    text-align: center;
+    display: none;
+    z-index: 10;
+  }
+
+  button {
+    padding: 10px 20px;
+    font-size: 16px;
+    cursor: pointer;
+    background-color: var(--target-color);
+    color: var(--text-color);
+    border: none;
+    border-radius: 5px;
+  }
+
+  button:hover {
+    background-color: #ff6b6b;
+  }
+
+  button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+</style>
+</head>
+<body>
+<div id="game-container"></div>
+<div id="controls">
+  <div id="score">Score: 0.00</div>
+  <div id="timer">Time: 10.0s</div>
+  <div id="successful-clicks">Successful Clicks: 0</div>
+  <div id="points-per-click">Points per click: 0.00</div>
+  <input type="range" id="size-slider" min="20" max="100" value="50">
+  <span id="size-value">50px</span>
+  <button id="reset-button">Reset Game</button>
+</div>
+<div id="game-over">
+  <h2>Game Over!</h2>
+  <p>Your final score: <span id="final-score"></span></p>
+  <p>Successful clicks: <span id="final-clicks"></span></p>
+  <p>Ranking: Top <span id="top-percent"></span>%</p>
+  <button id="restart-button" disabled>Play Again</button>
+</div>
+
+<script>
+const gameContainer = document.getElementById('game-container');
+const scoreElement = document.getElementById('score');
+const timerElement = document.getElementById('timer');
+const successfulClicksElement = document.getElementById('successful-clicks');
+const pointsPerClickElement = document.getElementById('points-per-click');
+const sizeSlider = document.getElementById('size-slider');
+const sizeValue = document.getElementById('size-value');
+const gameOverElement = document.getElementById('game-over');
+const finalScoreElement = document.getElementById('final-score');
+const finalClicksElement = document.getElementById('final-clicks');
+const topPercentElement = document.getElementById('top-percent');
+const restartButton = document.getElementById('restart-button');
+const resetButton = document.getElementById('reset-button');
+
+let score = 0;
+let timeLeft = 10;
+let gameInterval;
+let squares = [];
+let targetSquare;
+let squareSize = 50;
+let isGameRunning = false;
+let successfulClicks = 0;
+let isMouseDown = false;
+let isGameOver = false;
+
+function createGrid() {
+  gameContainer.innerHTML = '';
+  squares = [];
+  const containerWidth = gameContainer.clientWidth;
+  const containerHeight = gameContainer.clientHeight;
+  const cols = Math.floor(containerWidth / squareSize);
+  const rows = Math.floor(containerHeight / squareSize);
+
+  gameContainer.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+  gameContainer.style.gridTemplateRows = `repeat(${rows}, 1fr)`;
+
+  for (let i = 0; i < rows * cols; i++) {
+    const square = document.createElement('div');
+    square.className = 'square';
+    square.addEventListener('mouseup', (e) => handleSquareClick(square, e));
+    gameContainer.appendChild(square);
+    squares.push(square);
+  }
+
+  setRandomTarget();
+  updatePointsPerClick();
+}
+
+function setRandomTarget() {
+  if (targetSquare) {
+    targetSquare.classList.remove('target');
+  }
+  targetSquare = squares[Math.floor(Math.random() * squares.length)];
+  targetSquare.classList.add('target');
+}
+
+function handleSquareClick(square, event) {
+  if (!isMouseDown || isGameOver) return;
+  
+  if (!isGameRunning) {
+    if (square === targetSquare) {
+      startGame();
+    }
+    return;
+  }
+
+  if (square === targetSquare) {
+    const pointsGained = calculatePoints();
+    score += pointsGained;
+    successfulClicks++;
+    updateScore();
+    successfulClicksElement.textContent = `Successful Clicks: ${successfulClicks}`;
+    setRandomTarget();
+  } else {
+    const pointsLost = calculatePoints();
+    score = Math.max(0, score - pointsLost);
+    successfulClicks = Math.max(0, successfulClicks - 1);
+    updateScore();
+    successfulClicksElement.textContent = `Successful Clicks: ${successfulClicks}`;
+    
+    showMissIndicator(square);
+  }
+}
+
+function showMissIndicator(square) {
+  square.classList.add('miss');
+  setTimeout(() => {
+    square.classList.remove('miss');
+  }, 300);
+}
+
+function calculatePoints() {
+  return Math.max(0.1, Math.log2(squares.length) / 2);
+}
+
+function updateScore() {
+  scoreElement.textContent = `Score: ${score.toFixed(2)}`;
+}
+
+function startGame() {
+  isGameRunning = true;
+  isGameOver = false;
+  document.body.classList.add('game-active');
+  score = 0;
+  successfulClicks = 0;
+  timeLeft = 10;
+  updateScore();
+  successfulClicksElement.textContent = `Successful Clicks: ${successfulClicks}`;
+  timerElement.textContent = `Time: ${timeLeft.toFixed(1)}s`;
+  setRandomTarget();
+
+  gameInterval = setInterval(() => {
+    timeLeft -= 0.1;
+    timerElement.textContent = `Time: ${timeLeft.toFixed(1)}s`;
+
+    if (timeLeft <= 0) {
+      endGame();
+    }
+  }, 100);
+}
+
+function endGame() {
+  clearInterval(gameInterval);
+  isGameRunning = false;
+  isGameOver = true;
+  document.body.classList.remove('game-active');
+  finalScoreElement.textContent = score.toFixed(2);
+  finalClicksElement.textContent = successfulClicks;
+  
+  const topPercent = calculateTopPercent(score);
+  topPercentElement.textContent = topPercent.toFixed(2);
+  
+  gameOverElement.style.display = 'block';
+  
+  restartButton.disabled = true;
+  setTimeout(() => {
+    restartButton.disabled = false;
+  }, 1000);
+}
+
+function calculateTopPercent(score) {
+  // This is a simplified calculation. In a real-world scenario,
+  // you'd compare against actual player data.
+  const averageScore = 20;
+  const maxScore = 80;
+  
+  if (score >= maxScore) return 0;
+  if (score <= averageScore) return 100 - ((score / averageScore) * 50);
+  return 50 - ((score - averageScore) / (maxScore - averageScore)) * 50;
+}
+
+function updateSquareSize() {
+  squareSize = parseInt(sizeSlider.value);
+  sizeValue.textContent = `${squareSize}px`;
+  createGrid();
+}
+
+function updatePointsPerClick() {
+  const pointsPerClick = calculatePoints();
+  pointsPerClickElement.textContent = `Points per click: ${pointsPerClick.toFixed(2)}`;
+}
+
+function resetGame() {
+  clearInterval(gameInterval);
+  isGameRunning = false;
+  isGameOver = false;
+  document.body.classList.remove('game-active');
+  score = 0;
+  successfulClicks = 0;
+  timeLeft = 10;
+  updateScore();
+  successfulClicksElement.textContent = `Successful Clicks: ${successfulClicks}`;
+  timerElement.textContent = `Time: ${timeLeft.toFixed(1)}s`;
+  createGrid();
+  updatePointsPerClick();
+  gameOverElement.style.display = 'none';
+}
+
+sizeSlider.addEventListener('input', updateSquareSize);
+window.addEventListener('resize', () => {
+  createGrid();
+  updatePointsPerClick();
+});
+
+restartButton.addEventListener('click', () => {
+  gameOverElement.style.display = 'none';
+  resetGame();
+});
+
+resetButton.addEventListener('click', resetGame);
+
+document.body.addEventListener('mousedown', () => {
+  isMouseDown = true;
+});
+
+document.body.addEventListener('mouseup', () => {
+  isMouseDown = false;
+});
+
+createGrid();
+updatePointsPerClick();
+</script>
+</body>
+</html>
